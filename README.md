@@ -1,0 +1,3 @@
+# Mantenimiento Predictivo en Entorno Industrial con Machine Learning
+
+El desarrollo de este trabajo se ha separado en 2 partes. En la primera parte se abordarán los problemas de limpieza, calidad y preprocesado de datos con R, un entorno de programación que aporta un gran abanico de métodos para realizar análisis estadísticos ya implementados. En la segunda parte el proyecto se utilizarán los datos ya limpiados para generar y validar diferentes modelos. Después de esta validación escogeremos el que mejores resultados nos haya dado. Esta segunda parte se realizará en Python, un lenguaje de programación de alto nivel que proporciona bibliotecas de aprendizaje automático ampliamente usadas como Scikitlearn.
