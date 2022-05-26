@@ -1,0 +1,391 @@
+---
+title: 'TFM: Parte 1. Limpieza y preprocesado de datos'
+author: "Autor: Adrià Pulido Castillo"
+date: "Mayo 2022"
+output:
+  html_document:
+    highlight: default
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_depth: 2
+  word_document: default
+  pdf_document:
+    highlight: zenburn
+    toc: yes
+---
+
+El desarrollo del TFM se ha separado en 2 partes. En la primera parte se abordarán los problemas de limpieza, calidad y preprocesado de datos con R, un entorno de programación que aporta un gran abanico de métodos para realizar análisis estadísticos ya implementados. En la segunda parte el proyecto se utilizarán los datos ya limpiados para generar y validar diferentes modelos. Después de esta validación escogeremos el que mejores resultados nos haya dado. Esta segunda parte se realizará en Python, un lenguaje de programación de alto nivel que proporciona bibliotecas de aprendizaje automático ampliamente usadas como Scikitlearn.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Loading the packages
+list.of.packages <- c("arules", "gridExtra", "ggplot2", "labelled", "mice", "nortest")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+library(arules)
+library(gridExtra)
+library(ggplot2)
+library(labelled)
+library(mice)
+library(corrplot)
+library(nortest)
+
+
+# printf definition
+printf <- function(...) cat(sprintf(...))
+
+```
+
+# Integración de datos
+
+Los datos que se utilizarán para realizar el estudio se pueden encontrar en https://www.kaggle.com/datasets/nphantawee/pump-sensor-data. El conjunto de datos contiene registros de 52 sensores diferentes conectados a una bomba de agua. Los sensores se leen y se registran cada minuto al igual que el estado de la máquina. El objetivo del conjunto de datos es poder predecir cuando esta bomba va a fallar, ya que una fallada de esta bomba puede crear problemas serios a muchas personas.
+
+A continuación se muestra una lista de todos los sensores en el conjunto de datos:
+
+SENSOR_00 - Motor Casing Vibration
+
+SENSOR_01 - Motor Frequency A
+
+SENSOR_02 - Motor Frequency B
+
+SENSOR_03 - Motor Frequency C
+
+SENSOR_04 - Motor Speed
+
+SENSOR_05 - Motor Current
+
+SENSOR_06 - Motor Active Power
+
+SENSOR_07 - Motor Apparent Power
+
+SENSOR_08 - Motor Reactive Power
+
+SENSOR_09 - Motor Shaft Power  
+
+SENSOR_10 - Motor Phase Current A
+
+SENSOR_11 - Motor Phase Current B
+
+SENSOR_12 - Motor Phase Current C
+
+SENSOR_13 - Motor Coupling Vibration
+
+SENSOR_14 - Motor Phase Voltage AB
+
+SENSOR_16 - Motor Phase Voltage BC
+
+SENSOR_17 - Motor Phase Voltage CA
+
+SENSOR_18 - Pump Casing Vibration
+
+SENSOR_19 - Pump Stage 1 Impeller Speed
+
+SENSOR_20 - Pump Stage 1 Impeller Speed
+
+SENSOR_21 - Pump Stage 1 Impeller Speed
+
+SENSOR_22 - Pump Stage 1 Impeller Speed
+
+SENSOR_23 - Pump Stage 1 Impeller Speed
+
+SENSOR_24 - Pump Stage 1 Impeller Speed
+
+SENSOR_25 - Pump Stage 2 Impeller Speed
+
+SENSOR_26 - Pump Stage 2 Impeller Speed
+
+SENSOR_27 - Pump Stage 2 Impeller Speed
+
+SENSOR_28 - Pump Stage 2 Impeller Speed
+
+SENSOR_29 - Pump Stage 2 Impeller Speed
+
+SENSOR_30 - Pump Stage 2 Impeller Speed
+
+SENSOR_31 - Pump Stage 2 Impeller Speed
+
+SENSOR_32 - Pump Stage 2 Impeller Speed
+
+SENSOR_33 - Pump Stage 2 Impeller Speed
+
+SENSOR_34 - Pump Inlet Flow
+
+SENSOR_35 - Pump Discharge Flow
+
+SENSOR_37 - Pump Lube Oil Overhead Reservoir Level
+
+SENSOR_38 - Pump Lube Oil Return Temp
+
+SENSOR_39 - Pump Lube Oil Supply Temp
+
+SENSOR_40 - Pump Thrust Bearing Active Temp
+
+SENSOR_41 - Motor Non Drive End Radial Bearing Temp 1
+
+SENSOR_42 - Motor Non Drive End Radial Bearing Temp 2
+
+SENSOR_43 - Pump Thrust Bearing Inactive Temp
+
+SENSOR_44 - Pump Drive End Radial Bearing Temp 1
+
+SENSOR_45 - Pump non Drive End Radial Bearing Temp 1
+
+SENSOR_46 - Pump Non Drive End Radial Bearing Temp 2
+
+SENSOR_47 - Pump Drive End Radial Bearing Temp 2
+
+SENSOR_48 - Pump Inlet Pressure
+
+SENSOR_49 - Pump Temp Unknown
+
+SENSOR_50 - Pump Discharge Pressure 1
+
+SENSOR_51 - Pump Discharge Pressure 2
+
+
+```{r}
+# Loading sensor data
+data = read.table("sensor.csv",sep=",",header=TRUE)
+
+data$machine_status <- factor(data$machine_status)
+data$timestamp <- as.POSIXct(data$timestamp, format="%Y-%m-%d %H:%M:%S")
+data$X <- NULL
+
+str(data)
+```
+
+# Limpieza de datos
+
+## Valores nulos
+
+Empezaremos revisando los valores nulos de nuestro conjunto de datos
+
+```{r}
+chec_null_values <- function(data)
+{
+  for (attribute in names(data))
+  {
+    nas <- sum(is.nan(data[,attribute]) | is.na(data[,attribute]))
+    printf("Attribute \"%s\" - null values: %d (%.2f %%)\n", attribute, nas, (nas / nrow(data) * 100))
+  
+  }
+}
+chec_null_values(data)
+```
+
+Podemos ver como hay varios registros con valores nulos. En especial vemos como el atributo sensor_15 no tiene ningún valor válido y como el sensor_50 tiene una falta de 34.96% de valores nulos. Como faltan demasiados datos se eliminaran estas dos columnas.
+
+```{r}
+data$sensor_15 <- NULL
+data$sensor_50 <- NULL
+```
+
+```{r}
+chec_rows_with_null_values <- function(data, num_null_values)
+{
+  nas <- nrow(data[rowSums(is.na(data))>=num_null_values,])
+  printf("Number of rows with at least %d null values: %d (%.2f %%)\n", num_null_values, nas, (nas / nrow(data) * 100))
+
+}
+chec_rows_with_null_values(data,1)
+chec_rows_with_null_values(data,2)
+
+```
+
+Vemos como existen 7076 registros con 2 o más valores nulos (el 3.21% del conjunto de datos). Entiendo que ha habido problemas en la recolección de estos registros, por lo que serán eliminados del conjunto de datos para evitar introducir errores. El resto de atributos nulos se remplazaran por los valores predecidos por el método missForest para no perder demasiados datos.
+
+```{r}
+row_to_keep  <- !(rowSums(is.na(data))>=2)
+data <- data[row_to_keep,]
+chec_rows_with_null_values(data,2)
+```
+
+
+```{r}
+  barplot(table(data$machine_status), xlab = "machine status", main = "Machine status histogram")
+```
+
+## Valores extremos
+
+Como se ha comentado en el apartado anterior, se utilizarán los gráficos de cajas de los atributos numéricos para revisar si existen valores outliers o registros inexistentes codificados con valores fuera del rango posible de estos atributos.
+
+```{r Fig1, fig.height=15, fig.width=15}
+par(mfrow=c(10,5))
+par(mar=c(0.5,1,1,1))
+
+for (attribute in names(data))
+{
+  if(is.numeric(data[,attribute]))
+  {
+    outliers <- sum(boxplot.stats(data[,attribute])$out == 0)
+    printf("%s - number of outliers equals to 0: %d (%.2f %%) \n",  attribute, outliers, (outliers / nrow(data) * 100))
+    boxplot(data[,attribute], ylab = attribute, main = paste(attribute, " Boxplot"))
+  }
+}
+```
+
+Vemos que hay una gran cantidad de outliers en el conjunto de datos. Interpreto que son incorrectos los valores outliers que valen 0 en los sensores de vibración, los sensores 0 y 18. Los remplazaré por valores predecidos por el método missForest.
+
+```{r}
+data$sensor_00[data$sensor_00 == 0] = NA
+data$sensor_18[data$sensor_18 == 0] = NA
+
+#Imputing Data
+imputed_Data <- mice(data[,-1], method = 'pmm')
+
+#get complete data (3rd out of 5)
+completeData <- complete(imputed_Data,3)
+completeData["timestamp"] <- data["timestamp"]
+
+data <- completeData
+chec_null_values(data)
+```
+
+# Transformació de datos
+
+El objetivo de los modelos que vamos a crear no es poder predecir el estado actual de la máquina, sino poder predecir el estado que la máquina tendrá en un futuro cercano para poder tener tiempo de actuar. Crearé una variable target Alert que valdrá 1 si en un futuro cercano (3 horas) la máquina entrará en estado de error. Con esta variable target tendremos un problema de clasificación binaria relativamente fácil de solucionar.
+
+```{r}
+# data ordred by timestamp
+data <- data[order(data$timestamp),]
+data["alert"] <- FALSE
+
+# hours to alert of bad machine status
+alert_hours <- 3 * 60 * 60 # 3 hours
+
+lastdate = as.POSIXct("1970/2/1")
+for (row in (nrow(data):1)) {
+  if (data[row, c("machine_status")] != "NORMAL")  {
+    data[row, c("alert")] = TRUE
+    lastdate = data[row, c("timestamp")]
+  }
+  if (data[row, c("timestamp")] > (lastdate - alert_hours)) {
+        data[row, c("alert")] = TRUE
+  }
+}
+
+barplot(table(data$alert), xlab = "Alert", main = "Alert histogram")
+
+```
+
+# Analisis de datos
+
+## Comprobación de la normalidad y homogeneidad de la varianza
+
+Algunas pruebas estadísticas requieren la comprobación previa de la normalidad y la homoscedasticidad, es decir, de la igualdad de varianzas entre los grupos que se van a comparar. Existen múltiples pruebas para verificar la suposición de la normalidad, algunas de las pruebas más habituales son los tests de Kolmogorov-Smirnov, el test de Shapiro-Wilk o el test Anderson-Darling. Se considera que los tests Shapiro-Wilk o Anderson-Darling son alternativas más potentes al test de Kolmogorov-Smirnov. En esta ocasión he utilizado el test de Anderson-Darling, ya que el Shapiro-Wilk tiene limitaciones con grandes conjuntos de datos (conjuntos con más de 5000 registros).
+
+Este test asume como hipótesis nula que la población está distribuida normalmente, si el p-valor es menor al nivel de significancia, generalmente 0.05, entonces la hipótesis nula es rechazada y se concluye que los datos no cuentan con una distribución normal. Si, por el contrario, el p-valor es mayor que el nivel de significancia se concluye que no se puede rechazar dicha hipótesis y se asume que los datos siguen una distribución normal.
+
+```{r}
+chec_normality <- function(data, pvalue = 0.05)
+{
+  for (attribute in names(data))
+  {
+    if(is.numeric(data[,attribute]))
+    {
+       normality_test = ad.test(data[,attribute])
+       printf("%s - Attribute \"%s\" - pvalue: %e - is normal: %d\n", normality_test$method, attribute, normality_test$p.value, normality_test$p.value >= pvalue)
+    }
+
+  }
+}
+
+chec_normality(data, 0.05)
+
+```
+
+Podemos observar como ninguno de los tests ha obtenido un p-valor mayor al nivel de significancia, ninguna de las variables sigue una distribución normal.
+
+Para comprobar la homogeneidad de la varianza tenemos también múltiples tests disponibles. Entre las pruebas más habituales se encuentra el test de Levene, que se aplica cuando los datos siguen una distribución normal, así como el test de Fligner-Killeen, que se trata de la alternativa no paramétrica, utilizada cuando los datos no cumplen con la condición de normalidad. Nosotros utilizaremos el test de Fligner-Killeen porque nuestros datos no siguen distribuciones normales. En este test la hipótesis nula asume igualdad de varianzas en los diferentes grupos de datos, por lo que p-valores superiores al nivel de significancia indicarán homoscedasticidad.
+
+```{r}
+chec_homoscedasticity <- function(data, pvalue = 0.05)
+{
+  for (attribute in names(data))
+  {
+    if(is.numeric(data[,attribute]))
+    {
+       test = fligner.test(data$alert, data[,attribute])
+       printf("%s - %s - pvalue: %e - homoscedasticity: %d\n", test$method, attribute, test$p.value, test$p.value >= pvalue)
+    }
+
+  }
+}
+
+chec_homoscedasticity(data, 0.05)
+
+```
+Podemos observar como algunas variables si presentan homoscedasticidad mientras que otras no.
+
+## Pruebas estadísticas
+
+### ¿Cómo es la correlación entre las variables?
+
+La primera prueba que se ha realizado ha sido el cálculo de la correlación entre las variables. Con esta prueba queremos saber si existe alguna correlación muy alta entre 2 variables, con lo que podríamos eliminar una de estas para facilitar el proceso de modelaje. Esta correlación se ha realizado con el método de Spearman, una alternativa no paramétrica a la correlación de Pearson, la cual no conlleva ninguna suposición sobre la distribución de los datos.
+
+```{r Fig2, fig.height=15, fig.width=15}
+
+numeric_attributes = c()
+for (attribute in names(data))
+{
+  if(is.numeric(data[,attribute]))
+  {
+      numeric_attributes = c(numeric_attributes, attribute)
+  }
+}
+
+corr_M = cor(data[, numeric_attributes], method = "spearman")
+corrplot(corr_M)
+
+corr_M = (1 - diag(dim(corr_M)[1])) * corr_M
+corr_M = abs(corr_M)
+
+big_corr = corr_M[corr_M  >= 0.8]
+big_corr = unique(big_corr)
+
+for (bc in big_corr)
+{
+  printf("\ncorrelation: %.3f\n", bc)
+  print(which(corr_M  == bc, arr.ind = TRUE))
+}
+
+```
+
+Vemos que hay una gran correlación entre los sensores 17 y 18 (0.992), los sensores 23 y 23 (0.849) y los sensores 41 y 42 (0.850). Alguno de estos atributos puede ser susceptible de ser eliminado.
+
+### ¿Que variables son significatibas?
+
+A continuación realizaré pruebas de comparación entre más de dos grupos para saber que variables no son significativas respecto a las alertas. Para realizar estas pruebas utilizaremos el test de Kruskal-Wallis, una alternativa no paramétrica al test de ANOVA el cual parte de la suposición que los datos siguen una distribución normal y presentan homoscedasticidad. Este test asume como hipótesis nula que ambos grupos presentan medias iguales y no tienen diferencias significativas, por lo que si obtenemos p-valores inferiores al valor de significancia podemos concluir que existen diferencias significativas entre los grupos de datos que estamos comparando.
+
+```{r}
+
+chec_significativity <- function(data, pvalue = 0.05)
+{
+  for (attribute in names(data))
+  {
+    if(is.numeric(data[,attribute]))
+    {
+       test = kruskal.test(data$alert, data[,c(attribute)])
+       printf("%s - %s - pvalue: %e - is significant: %d\n", test$method, attribute, test$p.value, test$p.value < pvalue)
+    }
+
+  }
+}
+
+chec_significativity(data, 0.05)
+
+
+```
+
+Podemos ver como la única variable que no es significativa es el sensor 20. Reduciremos el conjunto de datos eliminando la columna del sensor 20 y sensor_17. Recordemos que el sensor 17 mostraba una correlación muy alta con el sensor 18, una correlación de 0.992, por lo que su información es redundante.
+
+```{r}
+data$sensor_17 <- NULL
+data$sensor_20 <- NULL
+write.csv(data, "sensor_clean.csv")
+```
